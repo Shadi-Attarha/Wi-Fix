@@ -1,13 +1,10 @@
 """
-DPP-based Coreset Selection for XRF55 Dataset
+Coreset Selection for XRF55 Dataset
 ===============================================
 Corrected architecture: treats (270,1000) as (9,30,1000) — 
 9 WiFi links as channels, 30 subcarriers × 1000 time as 2D plane.
 
 WHY this is the right fix (parallel to Widar3.0):
-
-  Widar mistake:   Conv2d(22,...) treated 22 TIMESTEPS as channels
-  Widar fix:       Conv3d(1,...) with (1,22,20,20) — time as real axis
 
   XRF55 mistake:   Conv1d(270,...) treats 270=3×3×30 as flat channels
                    — loses subcarrier frequency ordering
@@ -29,16 +26,14 @@ Run:
     # Edit DATA_PATH, TEXT_PATH at top, then:
 
     # Step A — train feature extractor (~15 min)
-    python dpp_xrf55.py --mode train_extractor \
+    python xrf55_Coreset.py --mode train_extractor \
         --extractor_path xrf55_extractor.pt --extractor_epochs 30
 
     # Step B — select and evaluate
-    python dpp_xrf55.py --mode select \
+    python xrf55_Coreset.py --mode select \
         --ipc 10 --method all --extractor_path xrf55_extractor.pt
 
-    # Herding v2 only (best method from Widar experiments)
-    python dpp_xrf55.py --mode select --ipc 10 --method herding_v2 \
-        --herding_var_weight 0.2 --herding_diversity 0.0
+
 
 Install: pip install dppy
 """
@@ -61,8 +56,8 @@ torch.multiprocessing.set_sharing_strategy('file_system')
 # ─────────────────────────────────────────────────────────────
 # CONFIG — edit these two paths
 # ─────────────────────────────────────────────────────────────
-DATA_PATH    = '/home/sattarha/data/XRF55-repo/dataset/XRF_dataset/'
-TEXT_PATH    = '/home/sattarha/data/XRF55-repo/dataset/XRF_dataset/'
+DATA_PATH    = '/XRF_dataset/'
+TEXT_PATH    = '/XRF_dataset/'
 SCENE        = 'dml'
 NUM_CLASSES  = 55
 DEVICE       = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -653,30 +648,8 @@ def main(args):
         run_eval('herding', herding_select(
             features, labels, args.ipc, NUM_CLASSES))
 
-    if args.method in ('herding_v2', 'all'):
-        print("\n" + "="*55)
-        print(f"HERDING V2 — mean+variance matching  "
-              f"(var_weight={args.herding_var_weight}, "
-              f"diversity={args.herding_diversity})")
-        print("="*55)
-        run_eval('herding_v2', herding_select_v2(
-            features, labels, args.ipc, NUM_CLASSES,
-            var_weight=args.herding_var_weight,
-            diversity_weight=args.herding_diversity))
 
-    if args.method in ('herding_v3', 'all'):
-        print("\n" + "="*55)
-        print(f"HERDING V3 — cluster-aware herding  "
-              f"(var_weight={args.herding_var_weight}, "
-              f"mult={args.herding_subclusters_mult})")
-        print("  Stage 1: k-means sub-clustering (discovers modes)")
-        print("  Stage 2: herding-v2 over centroids (mean+var matching)")
-        print("  Stage 3: nearest real sample per chosen centroid")
-        print("="*55)
-        run_eval('herding_v3', herding_select_v3(
-            features, labels, args.ipc, NUM_CLASSES,
-            var_weight=args.herding_var_weight,
-            n_subclusters_mult=args.herding_subclusters_mult))
+
 
     if args.method in ('DPP', 'all'):
         print("\n" + "="*55)
@@ -692,20 +665,6 @@ def main(args):
         run_eval('kmeans', kmeans_select(
             features, labels, args.ipc, NUM_CLASSES))
 
-    if args.method in ('kmeans_herding', 'all'):
-        print("\n" + "="*55)
-        print(f"KMEANS-HERDING — prototype-constrained herding  "
-              f"(order={args.kh_cluster_order}, "
-              f"mean_w={args.kh_mean_weight}, "
-              f"var_w={args.kh_var_weight}, "
-              f"div_w={args.kh_inter_div_weight})")
-        print("="*55)
-        run_eval('kmeans_herding', kmeans_herding_select(
-            features, labels, args.ipc, NUM_CLASSES,
-            mean_weight=args.kh_mean_weight,
-            var_weight=args.kh_var_weight,
-            inter_div_weight=args.kh_inter_div_weight,
-            cluster_order_by=args.kh_cluster_order))
 
     if args.method in ('kcenter', 'all'):
         print("\n" + "="*55)
@@ -716,11 +675,8 @@ def main(args):
 
     method_type = {
         'herding':        'mean matching',
-        'herding_v2':     'mean+var matching',
-        'herding_v3':     'cluster-aware herding',
         'DPP':            'diverse set',
         'kmeans':         'prototypes',
-        'kmeans_herding': 'prototype-constrained herding',
         'kcenter':        'max coverage',
     }
 
@@ -756,28 +712,7 @@ if __name__ == '__main__':
     parser.add_argument('--dropout',         type=float, default=0.3)
     parser.add_argument('--batch_size',      type=int,   default=16,
                         help='Reduce if OOM — XRF55 samples are large')
-    # herding_v2 / herding_v3 shared parameters
-    parser.add_argument('--herding_var_weight', type=float, default=0.2,
-                        help='Variance-matching weight [0,1). '
-                             '0.0 = mean only. 0.1–0.3 recommended.')
-    parser.add_argument('--herding_diversity',  type=float, default=0.0,
-                        help='Diversity repulsion weight for herding_v2 [0,1).')
-    # herding_v3 only
-    parser.add_argument('--herding_subclusters_mult', type=int, default=3,
-                        help='Over-clustering factor M for herding_v3.')
-    # kmeans_herding parameters
-    parser.add_argument('--kh_mean_weight',    type=float, default=0.2,
-                        help='Herding mean-matching weight for kmeans_herding.')
-    parser.add_argument('--kh_var_weight',     type=float, default=0.1,
-                        help='Herding variance-matching weight for kmeans_herding. '
-                             '0.0–0.15 recommended.')
-    parser.add_argument('--kh_inter_div_weight', type=float, default=0.0,
-                        help='Inter-cluster diversity weight for kmeans_herding. '
-                             '0.0=off (default). 0.1–0.2 if adjacent clusters overlap.')
-    parser.add_argument('--kh_cluster_order',  type=str,   default='variance',
-                        choices=['variance', 'size', 'distance'],
-                        help='Cluster processing order for kmeans_herding. '
-                             'variance=high-variance first (recommended for XRF55), '
-                             'size=dense first, distance=farthest from mean first.')
+   
+
     args = parser.parse_args()
     main(args)
