@@ -1,7 +1,7 @@
 """
-distill_ntufi_corrected.py
+ntufi_Coreset.py
 ==========================
-Dataset distillation for NTU-Fi HAR.
+Dataset coreset selection for NTU-Fi HAR.
 
 This version lets you choose where the selector operates:
 
@@ -47,7 +47,7 @@ torch.multiprocessing.set_sharing_strategy("file_system")
 # ---------------------------------------------------------------------
 # CONFIG
 # ---------------------------------------------------------------------
-DATA_ROOT = "/home/sattarha/data/WiFi-CSI-Sensing-Benchmark/NTU-Fi_HAR/"
+DATA_ROOT = "/WiFi-CSI-Sensing-Benchmark/NTU-Fi_HAR/"
 NUM_CLASSES = 6
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -240,7 +240,7 @@ def extract_raw_samples(dataset, batch_size=32, num_workers=0,
         f"dataset has {len(dataset)} items."
     )
 
-    raw_x = maybe_standardize_and_pca(
+    raw_x = standardize_and_pca(
         raw_x, standardize=standardize, pca_dim=pca_dim,
         random_state=random_state
     )
@@ -281,7 +281,7 @@ def extract_original_mat_samples(dataset, modal=None, standardize=True,
 
     raw_x = np.concatenate(all_x, axis=0)
     labels = np.asarray(all_y)
-    raw_x = maybe_standardize_and_pca(
+    raw_x = standardize_and_pca(
         raw_x, standardize=standardize, pca_dim=pca_dim,
         random_state=random_state
     )
@@ -290,7 +290,7 @@ def extract_original_mat_samples(dataset, modal=None, standardize=True,
     return raw_x, labels
 
 
-def maybe_standardize_and_pca(x, standardize=True, pca_dim=128,
+def standardize_and_pca(x, standardize=True, pca_dim=128,
                               random_state=42):
     if standardize:
         scaler = StandardScaler()
