@@ -30,19 +30,19 @@ still runs.
 
 Run:
     # Step A — train feature extractor (~15 min)
-    python xrf55_dpp_kd.py --mode train_extractor \
+    python xrf55_ResNet_kd.py --mode train_extractor \
         --extractor_path xrf55_extractor.pt --extractor_epochs 30
 
     # Step B — select + coreset-teacher + KD, all implemented methods
-    python xrf55_dpp_kd.py --mode select \
+    python xrf55_ResNet_kd.py --mode select \
         --ipc 10 --method all --extractor_path xrf55_extractor.pt
 
     # Single method, full KD
-    python xrf55_dpp_kd.py --mode select --ipc 10 --method herding \
+    python xrf55_ResNet_kd.py --mode select --ipc 10 --method herding \
         --extractor_path xrf55_extractor.pt
 
     # CE-only coreset baseline (no teacher/distillation)
-    python xrf55_dpp_kd.py --mode select --ipc 10 --method herding \
+    python xrf55_ResNet_kd.py --mode select --ipc 10 --method herding \
         --baseline coreset_ce --extractor_path xrf55_extractor.pt
 
 Install: pip install dppy --break-system-packages
@@ -74,8 +74,8 @@ except ImportError:
 # ─────────────────────────────────────────────────────────────
 # CONFIG — edit these two paths
 # ─────────────────────────────────────────────────────────────
-DATA_PATH    = '/home/sattarha/data/XRF55-repo/dataset/XRF_dataset/'
-TEXT_PATH    = '/home/sattarha/data/XRF55-repo/dataset/XRF_dataset/'
+DATA_PATH    = '/dataset/XRF_dataset/'
+TEXT_PATH    = '/dataset/XRF_dataset/'
 SCENE        = 'dml'
 NUM_CLASSES  = 55
 DEVICE       = 'cuda' if torch.cuda.is_available() else 'cpu'
