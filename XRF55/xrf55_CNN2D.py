@@ -10,16 +10,16 @@ Methods available:
 
 Run:
     # Step A — train feature extractor (~15 min, one-time)
-    python dpp_xrf55.py --mode train_extractor \
+    python xrf55_CNN2D.py --mode train_extractor \
         --extractor_path xrf55_extractor.pt --extractor_epochs 30
 
     # Step B — random selection only
-    python dpp_xrf55.py --mode select \
+    python xrf55_CNN2D.py --mode select \
         --ipc 10 --method random \
         --extractor_path xrf55_extractor.pt
 
     # Step B — all methods for comparison
-    python dpp_xrf55.py --mode select \
+    python xrf55_CNN2D.py --mode select \
         --ipc 10 --method all \
         --extractor_path xrf55_extractor.pt
 
@@ -48,8 +48,8 @@ from sklearn.exceptions import ConvergenceWarning
 # ─────────────────────────────────────────────────────────────
 # CONFIG — edit these two paths
 # ─────────────────────────────────────────────────────────────
-DATA_PATH    = '/home/sattarha/data/XRF55-repo/dataset/XRF_dataset/'
-TEXT_PATH    = '/home/sattarha/data/XRF55-repo/dataset/XRF_dataset/'
+DATA_PATH    = '/dataset/XRF_dataset/'
+TEXT_PATH    = '/dataset/XRF_dataset/'
 SCENE        = 'dml'
 NUM_CLASSES  = 55
 DEVICE       = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -445,230 +445,6 @@ from sklearn.exceptions import ConvergenceWarning
 ###########
 from sklearn.decomposition import PCA
 
-
-def gmm_stratified_herding(
-    features,
-    labels,
-    n_per_class,
-    var_weight=0.0,
-    global_weight=0.2,
-    k_max=3,
-    min_samples_per_component=20,
-    reg_covar=0.001,
-    random_state=42,
-):
-
-    assert var_weight >= 0.0 and global_weight >= 0.0, (
-        "var_weight and global_weight must be non-negative."
-    )
-    assert var_weight + global_weight <= 1.0, (
-        f"var_weight ({var_weight}) + global_weight ({global_weight}) must be <= 1.0"
-    )
-
-    print("shadi")
-    print(k_max, min_samples_per_component,var_weight)
-    eps = 1e-8
-    selected = []
-
-    num_classes = NUM_CLASSES
-    print("shadi")
-    print(var_weight, global_weight, k_max, min_samples_per_component, reg_covar)
-
-    for c in range(num_classes):
-        mask    = labels == c
-        cls_f   = features[mask]
-        cls_idx = np.where(mask)[0]
-        N_c     = len(cls_f)
-
-        print(f"  Class {c} ({CLASS_NAMES[c]}): {N_c} samples → target {n_per_class}")
-
-        if N_c <= n_per_class:
-            selected.extend(cls_idx.tolist())
-            continue
-
-        # ------------------------------------------------------------------ #
-        # Step 1: BIC-based GMM model selection (unchanged)                   #
-        # ------------------------------------------------------------------ #
-
-        k_max_c = min(k_max, N_c // min_samples_per_component)
-        k_max_c = max(k_max_c, 1)
-
-        best_bic = np.inf
-        best_gmm = None
-        best_k   = 1
-        best_cov = "diag"
-
-        for cov_type in ("diag",):
-            for k in range(1, k_max_c + 1):
-                try:
-                    with warnings.catch_warnings():
-                        warnings.simplefilter("ignore", ConvergenceWarning)
-                        gmm = GaussianMixture(
-                            n_components=k,
-                            covariance_type=cov_type,
-                            reg_covar=reg_covar,
-                            n_init=5,
-                            max_iter=300,
-                            random_state=random_state,
-                        )
-                        gmm.fit(cls_f)
-
-                    if not gmm.converged_:
-                        continue
-
-                    bic = gmm.bic(cls_f)
-                    if bic < best_bic:
-                        best_bic = best_bic
-                        best_gmm = gmm
-                        best_k   = k
-                        best_cov = cov_type
-
-                except Exception:
-                    continue
-
-        if best_gmm is None:
-            best_gmm = GaussianMixture(
-                n_components=1,
-                covariance_type="diag",
-                reg_covar=reg_covar,
-                random_state=random_state,
-            ).fit(cls_f)
-            best_k   = 1
-            best_cov = "diag"
-
-        print(f"    → GMM selected: K={best_k}, cov_type='{best_cov}', "
-              f"BIC={best_bic:.2f}")
-
-        component_labels = best_gmm.predict(cls_f)
-        K_star           = best_k
-
-        # ------------------------------------------------------------------ #
-        # Step 2: Budget allocation using cluster SIZE proportions            #
-        # instead of GMM mixture weights                                      #
-        # ------------------------------------------------------------------ #
-
-        component_sizes = np.bincount(component_labels, minlength=K_star)  # hard counts
-        mixture_weights = component_sizes / component_sizes.sum()           # size-proportional
-
-        raw_budgets   = mixture_weights * n_per_class
-        floor_budgets = np.floor(raw_budgets).astype(int)
-        remainders    = raw_budgets - floor_budgets
-        deficit       = n_per_class - floor_budgets.sum()
-
-        top_idx = np.argsort(-remainders)[:deficit]
-        floor_budgets[top_idx] += 1
-        budgets = floor_budgets.copy()
-
-        budgets = np.minimum(budgets, component_sizes)
-
-        shortfall = n_per_class - budgets.sum()
-        if shortfall > 0:
-            headroom = component_sizes - budgets
-            for idx in np.argsort(-headroom):
-                if shortfall == 0:
-                    break
-                give = min(headroom[idx], shortfall)
-                budgets[idx] += give
-                shortfall    -= give
-
-        print(f"    → Component budgets: {budgets.tolist()}")
-
-        # ------------------------------------------------------------------ #
-        # Step 3: Variance-aware herding with global mean alignment           #
-        # (fully unchanged)                                                   #
-        # ------------------------------------------------------------------ #
-
-        chosen_cls = []
-
-        class_running_sum   = np.zeros(cls_f.shape[1])
-        class_running_count = 0
-
-        class_mean  = cls_f.mean(axis=0)
-        class_scale = np.linalg.norm(cls_f - class_mean, axis=1).max() + eps
-
-        strata_order = np.argsort(-budgets)
-
-        for k in strata_order:
-            budget_k = int(budgets[k])
-            if budget_k == 0:
-                continue
-
-            stratum_local_idx = np.where(component_labels == k)[0]
-            stratum_f         = cls_f[stratum_local_idx]
-            N_k               = len(stratum_f)
-
-            if N_k <= budget_k:
-                chosen_cls.extend(stratum_local_idx.tolist())
-                class_running_sum   += stratum_f.sum(axis=0)
-                class_running_count += N_k
-                continue
-
-            stratum_mean = stratum_f.mean(axis=0)
-            stratum_var  = stratum_f.var(axis=0)
-            stratum_sq   = stratum_f ** 2
-
-            mean_scale = np.linalg.norm(stratum_f - stratum_mean, axis=1).max() + eps
-            var_scale  = np.linalg.norm(stratum_var) + eps
-
-            running_sum    = np.zeros_like(stratum_mean)
-            running_sum_sq = np.zeros_like(stratum_mean)
-            chosen_local   = []
-            chosen_set     = set()
-
-            for step in range(1, budget_k + 1):
-
-                # --- (a) Local mean cost ---
-                new_means = (running_sum[None, :] + stratum_f) / step
-                mean_dist = np.linalg.norm(stratum_mean - new_means, axis=1)
-                mean_cost = np.clip(mean_dist / mean_scale, 0.0, 1.0)
-
-                # --- (b) Variance cost ---
-                if var_weight > 0.0 and step > 1:
-                    new_sum_sq = running_sum_sq[None, :] + stratum_sq
-                    new_vars   = new_sum_sq / step - new_means ** 2
-                    new_vars   = np.maximum(new_vars, 0.0)
-                    var_dist   = np.linalg.norm(stratum_var - new_vars, axis=1)
-                    var_cost   = np.clip(var_dist / var_scale, 0.0, 1.0)
-                else:
-                    var_cost = np.zeros(N_k)
-
-                # --- (c) Global mean-alignment cost ---
-                global_count     = class_running_count + step
-                new_global_means = (
-                    class_running_sum[None, :] + running_sum[None, :] + stratum_f
-                ) / global_count
-                global_dist = np.linalg.norm(class_mean - new_global_means, axis=1)
-                global_cost = np.clip(global_dist / class_scale, 0.0, 1.0)
-
-                # --- Combined cost ---
-                w_local   = 1.0 - var_weight - global_weight
-                herd_cost = (
-                      w_local       * mean_cost
-                    + var_weight    * var_cost
-                    + global_weight * global_cost
-                )
-
-                if chosen_set:
-                    herd_cost[list(chosen_set)] = np.inf
-
-                best_local = int(np.argmin(herd_cost))
-                chosen_local.append(best_local)
-                chosen_set.add(best_local)
-                running_sum    += stratum_f[best_local]
-                running_sum_sq += stratum_sq[best_local]
-
-            for li in chosen_local:
-                class_running_sum += stratum_f[li]
-            class_running_count += len(chosen_local)
-
-            chosen_cls.extend(stratum_local_idx[chosen_local].tolist())
-
-        selected.extend(cls_idx[chosen_cls].tolist())
-
-    print(f"\nTotal selected: {len(selected)}")
-    return selected
-
-
 # ─────────────────────────────────────────────────────────────
 # WARMUP SCHEDULER
 # ─────────────────────────────────────────────────────────────
@@ -834,29 +610,6 @@ def main(args):
         results['random'] = (acc, std)
         print(f"Random → {acc:.2f}% ± {std:.2f}%")
 
-    # ── DPP SELECTION ─────────────────────────────────────────
-    if args.method in ('gmm_stratified_herding'):
-       print("\nGMM-STRATIFIED HERDING")
-       idx = gmm_stratified_herding(
-        features,
-        labels_feat,
-        args.ipc,
-        var_weight=args.gmm_var_weight,
-        k_max=args.gmm_k_max,
-        min_samples_per_component=args.gmm_min_samples_per_component,
-        reg_covar=args.gmm_reg_covar,
-        random_state=42)
-       torch.save({'indices': idx, 'method': 'gmm_stratified_herding',
-                    'ipc': args.ipc, 'seed': args.random_seed},
-                   f'xrf55_gmm_ipc{args.ipc}.pt')
-       acc, std = evaluate_distilled(
-            idx, dst_train, dst_test, NUM_CLASSES, DEVICE,
-            epochs=args.eval_epochs,
-            label_smoothing=args.label_smoothing,
-            warmup_epochs=args.warmup_epochs,
-            dropout=args.dropout)
-       results['gmm_stratified_herding'] = (acc, std)
-       print(f"gmm_stratified_herding → {acc:.2f}% ± {std:.2f}%")
     
     if args.method in ('herding', 'all'):
         print("\n" + "="*55)
@@ -968,7 +721,7 @@ if __name__ == '__main__':
 
     # ── method choices now include 'random' ───────────────────
     parser.add_argument('--method', type=str, default='all',
-                        choices=['random', 'DPP', 'kmeans', 'kcenter', 'all','herding','gmm_stratified_herding'],
+                        choices=['random', 'DPP', 'kmeans', 'kcenter', 'all','herding'],
                         help=(
                             'random  : random per-class sampling (no extractor needed)\n'
                             'DPP     : diversity-aware DPP selection\n'
@@ -977,24 +730,11 @@ if __name__ == '__main__':
                             'all     : run all four methods'
                         ))
 
-    parser.add_argument('--gmm_k_max', type=int, default=135,
-                    help='Maximum number of GMM components per class.')
-    parser.add_argument('--global_weight', type=float, default=0.01)
-    parser.add_argument('--gmm_min_samples_per_component', type=int, default=1, help='Minimum expected samples per GMM component.')
-    parser.add_argument('--gmm_reg_covar', type=float, default=0.0001,
-                    help='GMM covariance regularization.')
-    parser.add_argument('--gmm_var_weight', type=float, default=0.0,
-                    help='Variance weight inside stratum herding.')
     parser.add_argument('--eval_epochs',     type=int,   default=500)
     parser.add_argument('--label_smoothing', type=float, default=0.1)
     parser.add_argument('--warmup_epochs',   type=int,   default=10)
     parser.add_argument('--dropout',         type=float, default=0.3)
     parser.add_argument('--batch_size',      type=int,   default=64)
-
-        #####Kmeans herding new
-
-
-
 
 
     # ── random seed for random selection reproducibility ──────
