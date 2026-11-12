@@ -1,15 +1,6 @@
 """
-Coreset Selection for Widar3.0 BVP — Extended Methods
+Coreset Selection for Widar3.0 BVP 
 ======================================================
-
-WHY DBSCAN CANNOT DIRECTLY REPLACE K-MEANS:
-  Task: select EXACTLY N samples per class.
-  K-means: k=N  → exactly N cluster centres → exactly N samples  ✓
-  DBSCAN:  eps+min_samples → unknown number of clusters + noise  ✗
-  DBSCAN cannot guarantee exactly N samples.
-
-  HOWEVER, DBSCAN's cluster structure CAN inform smarter selection.
-  See dbscan_informed below — this is the correct way to use DBSCAN.
 
 SELECTION SPACES
 ----------------
@@ -41,9 +32,7 @@ INDEX-ALIGNMENT GUARANTEE
   non-deterministic across filesystems and Python versions).
 
 METHODS:
-  Existing:  random, kmeans, kcenter, DPP
-  New:
-    herding         Greedy mean matching.
+   random, kmeans, kcenter, DPP,  herding (Greedy mean matching)
 
 
 
@@ -51,10 +40,10 @@ METHODS:
 
 
 Run:
-    python dpp_selection_widar.py --mode train_extractor
-    python dpp_selection_widar.py --mode select --ipc 100 --method all
-    python dpp_selection_widar.py --mode select --ipc 50  --method all --selection_space raw
-    python dpp_selection_widar.py --mode select --ipc 10  --method all --selection_space original_csv
+    python widar_CoreSet.py --mode train_extractor
+    python widar_CoreSet.py --mode select --ipc 100 --method all
+    python widar_CoreSet.py --mode select --ipc 50  --method all --selection_space raw
+    python widar_CoreSet.py --mode select --ipc 10  --method all --selection_space original_csv
 """
 
 import os
@@ -83,7 +72,7 @@ from tqdm import tqdm
 # ─────────────────────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────────────────────
-DATA_ROOT   = '/data/sattarha/Widardata2/'
+DATA_ROOT   = 'the address to your dataset'
 NUM_CLASSES = 6
 DEVICE      = 'cuda' if torch.cuda.is_available() else 'cpu'
 CLASS_NAMES = ['Push&Pull', 'Sweep', 'Clap', 'Slide',
@@ -214,7 +203,7 @@ def train_extractor(dst_train, dst_test, save_path,
 # SELECTION MATRIX BUILDERS
 # ─────────────────────────────────────────────────────────────
 
-def _maybe_standardize_and_pca(x, standardize=True, pca_dim=128,
+def standardize_and_pca(x, standardize=True, pca_dim=128,
                                 random_state=42):
     """StandardScaler + PCA helper shared by all raw extractors."""
     if standardize:
@@ -288,7 +277,7 @@ def extract_raw_samples(dataset, standardize=True, pca_dim=128,
         f"but dataset has {len(dataset)} items."
     )
 
-    raw_x = _maybe_standardize_and_pca(
+    raw_x = standardize_and_pca(
         raw_x, standardize=standardize, pca_dim=pca_dim,
         random_state=random_state
     )
@@ -335,7 +324,7 @@ def extract_original_csv_samples(dataset, standardize=True, pca_dim=128,
         f"but dataset has {len(dataset)} items."
     )
 
-    raw_x = _maybe_standardize_and_pca(
+    raw_x = standardize_and_pca(
         raw_x, standardize=standardize, pca_dim=pca_dim,
         random_state=random_state
     )
@@ -394,61 +383,6 @@ def build_selection_matrix(args, dst_train, extractor=None):
 # ═════════════════════════════════════════════════════════════
 # EXISTING SELECTION METHODS (unchanged from original)
 # ═════════════════════════════════════════════════════════════
-def kernel_thinning(features, labels, n_per_class, num_classes):
-    """
-    Classical Kernel Herding (Chen, Welling & Smola, 2010) — greedy
-    Frank-Wolfe selection matching the kernel mean embedding of each
-    class, using a Gaussian kernel with median-heuristic bandwidth
-    (same construction as dpp_select above).
-    """
-    feat_n   = features
-    selected = []
-
-    for c in range(num_classes):
-        mask    = labels == c
-        cls_f   = feat_n[mask]
-        cls_idx = np.where(mask)[0]
-        N_c     = len(cls_f)
-        print(f"  Class {c} ({CLASS_NAMES[c]}): {N_c} → {n_per_class}")
-
-        if N_c <= n_per_class:
-            selected.extend(cls_idx.tolist())
-            continue
-
-        # Gaussian Gram matrix, median-heuristic bandwidth
-        pw    = cdist(cls_f, cls_f, 'euclidean')
-        sigma = np.median(pw[pw > 0])
-        K     = np.exp(-pw**2 / (2 * sigma**2))
-        m     = K.mean(axis=1)            # <mu, phi(x_i)> for each i
-
-        chosen             = []
-        chosen_set         = set()
-        running_kernel_sum = np.zeros(N_c)
-
-        for t in range(1, n_per_class + 1):
-            score = m - running_kernel_sum / t
-            if chosen_set:
-                score[list(chosen_set)] = -np.inf
-            best = int(np.argmax(score))
-            chosen.append(best)
-            chosen_set.add(best)
-            running_kernel_sum += K[:, best]
-
-        selected.extend(cls_idx[chosen].tolist())
-
-    return selected
-
-def random_select_1(labels, n_per_class, num_classes, random_state=42):
-    rng = np.random.RandomState(random_state)
-    selected = []
-    for c in range(num_classes):
-        idx = np.where(labels == c)[0]
-        chosen = (idx.tolist() if len(idx) <= n_per_class
-                  else rng.choice(idx, n_per_class, replace=False).tolist())
-        selected.extend(chosen)
-        print(f"  Class {c} ({CLASS_NAMES[c]}): {len(chosen)}")
-    return selected
-
 
 def dpp_select(features, labels, n_per_class, num_classes,
                random_state=42):
@@ -735,10 +669,6 @@ def main(args):
         results[name] = (acc, std)
         print(f"{name} → {acc:.2f}% ± {std:.2f}%")
 
-    if args.method in ('kernel_thinning', 'all'):
-        run_eval('kernel_thinning', kernel_thinning_select(
-        features, labels, args.ipc, NUM_CLASSES,
-        g=args.kt_g, random_state=42))
         
     if args.method in ('kmeans', 'all'):
         run_eval('kmeans', kmeans_select(features, labels,
@@ -796,7 +726,7 @@ if __name__ == '__main__':
     parser.add_argument('--mode', default='select',
                         choices=['train_extractor', 'select','diagnose'])
     parser.add_argument('--extractor_path',
-                        default='/home/sattarha/data/widar_related/herding_new_may2026/extractor/cnn3d_extractor_updatedFeatures.pt')
+                        default='***/herding_new_may2026/extractor/cnn3d_extractor_updatedFeatures.pt')
     parser.add_argument('--extractor_epochs', type=int, default=100)
 
     # ── Selection space ───────────────────────────────────────────────────
@@ -828,21 +758,15 @@ if __name__ == '__main__':
     parser.add_argument('--ipc',    type=int,   default=100)
     parser.add_argument('--method', default='all',
                         choices=['random', 'kmeans', 'kcenter', 'DPP',
-                                 'herding', 'all','kernel_thinning'
+                                 'herding', 'all'
                                  ])
-    parser.add_argument('--kt_g', type=int, default=4,
-                    help="GoodPoints KT-Compress++ oversampling parameter.")
+
     parser.add_argument('--eval_epochs',     type=int,   default=800)
     parser.add_argument('--label_smoothing', type=float, default=0.1)
     parser.add_argument('--warmup_epochs',   type=int,   default=10)
     parser.add_argument('--dropout',         type=float, default=0.2)
 
 
-
-    # ── stratified (density strata) ───────────────────────────────────────
-    parser.add_argument('--dense_frac',  type=float, default=0.60)
-    parser.add_argument('--medium_frac', type=float, default=0.25)
-    parser.add_argument('--sparse_frac', type=float, default=0.15)
 
     args = parser.parse_args()
     main(args)
