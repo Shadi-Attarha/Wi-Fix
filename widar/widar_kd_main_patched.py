@@ -13,7 +13,7 @@ from kd_diagnostics import confusion_matrix_report, compare_models_per_class, pe
 # ─────────────────────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────────────────────
-DATA_ROOT   = '/data/sattarha/Widardata2/'
+DATA_ROOT   = '/Widardata2/'
 NUM_CLASSES = 6
 DEVICE      = 'cuda' if torch.cuda.is_available() else 'cpu'
 CLASS_NAMES = ['Push&Pull', 'Sweep', 'Clap', 'Slide',
@@ -509,19 +509,6 @@ def kmeans_select(features, labels, n_per_class, num_classes, random_state=42):
     return selected_indices
 
 
-def random_select_from_labels(labels, n_per_class, num_classes, random_state=42):
-    rng = np.random.default_rng(random_state)
-    selected = []
-    for c in range(num_classes):
-        cls_idx = np.where(labels == c)[0]
-        print(f"  Class {c} ({CLASS_NAMES[c]}): {len(cls_idx)} → {n_per_class}")
-        if len(cls_idx) <= n_per_class:
-            selected.extend(cls_idx.tolist())
-        else:
-            selected.extend(rng.choice(cls_idx, n_per_class,
-                                       replace=False).tolist())
-    print(f"Random selected: {len(selected)}")
-    return selected
 
 
 def select_coreset(method, features, labels, n_per_class, num_classes,
@@ -1203,7 +1190,7 @@ if __name__ == '__main__':
                         choices=['train_extractor', 'select'])
 
     parser.add_argument('--extractor_path',   type=str,
-                        default='/home/sattarha/data/widar_related/kd/cnn3d_extractor_updatedFeatures.pt')
+                        default='/cnn3d_extractor_updatedFeatures.pt')
     parser.add_argument('--extractor_epochs', type=int, default=100)
 
     parser.add_argument('--ipc',    type=int, default=100)
