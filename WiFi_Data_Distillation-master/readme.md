@@ -1,0 +1,119 @@
+# Dataset Distillation by Matching Training Trajectories for Wifi data
+
+
+
+
+
+This repo contains code for Dataset Distillation by Matching Training Trajectories for WiFi data. 
+
+
+The task of "Dataset Distillation" is to learn a small number of synthetic images such that a model trained on this set alone will have similar test performance as a model trained on the full real dataset.
+
+
+
+
+
+
+### Getting Started
+
+First, download our repo:
+```bash
+https://github.com/ComNets-Bremen/WiFi_Data_Distillation.git
+cd WiFi_Data_Distillation
+```
+
+For an express installation, we include ```.yaml``` files.
+
+If you have an RTX 30XX GPU (or newer), run
+
+```bash
+conda env create -f requirements_11_3.yaml
+```
+
+If you have an RTX 20XX GPU (or older), run
+
+```bash
+conda env create -f requirements_10_2.yaml
+```
+
+You can then activate your  conda environment with
+```bash
+conda activate distillation
+```
+##### Quadro Users Take Note:
+```torch.nn.DataParallel``` seems not to work on Quadro A5000 GPUs, and this may extend to other Quadro cards.
+
+If you experience indefinite hanging during training, try running the process with only 1 GPU by prepending ```CUDA_VISIBLE_DEVICES=0``` to the command.
+
+### Generating Expert Trajectories
+Before doing any distillation, you'll need to generate some expert trajectories using ```buffer.py```
+
+The following command will train 200 CNN models on Widar3.0 with ZCA whitening for 100 epochs each:
+```bash
+python buffer.py --dataset=widar --model=widar_CNN --train_epochs=100 --num_experts=200 --zca --buffer_path=***/mtt-distillation_Widar/buffers --data_path=+**/data/Widardata2
+
+```
+
+
+### Distillation by Matching Training Trajectories
+The following command will then use the buffers we just generated to distill Widar3.0 down to just 100 samples per class:
+```bash
+python distill.py --dataset=widar --model=widar_CNN --ipc=100 --syn_steps=10 --expert_epochs=2 --max_start_epoch=10 --lr_img=100 --lr_lr=1e-06 --lr_teacher=0.001 --buffer_path=/home/sattarha/data/mtt-distillation_Widar/buffers --data_path=/home/sattarha/data/Widardata2
+
+```
+
+
+
+## Acknowledgments
+Our work is implemented based on the following projects. We really appreciate their excellent open-source works!
+https://georgecazenavette.github.io/mtt-distillation/
+https://github.com/xyanchen/WiFi-CSI-Sensing-Benchmark/tree/main
+
+
+## Related Work
+<ol>
+<li>
+    
+George Cazenavette et al. <a href="https://georgecazenavette.github.io/mtt-distillation/">"Dataset Distillation"</a>, in arXiv preprint 2018
+</li>
+<li>
+    Bo Zhao et al. <a href="https://arxiv.org/abs/2006.05929">"Dataset Condensation with Gradient Matching"</a>, in ICLR 2020
+</li>
+<li>
+    Bo Zhao and Hakan Bilen. <a href="https://arxiv.org/abs/2102.08259">"Dataset Condensation with Differentiable Siamese Augmentation"</a>, in ICML 2021
+</li>
+<li>
+    Timothy Nguyen et al. <a href="https://arxiv.org/abs/2011.00050">"Dataset Meta-Learning from Kernel Ridge-Regression"</a>, in ICLR 2021
+</li>
+<li>
+    Timothy Nguyen et al. <a href="https://arxiv.org/abs/2107.13034">"Dataset Distillation with Infinitely Wide Convolutional Networks"</a>, in NeurIPS 2021
+</li>
+<li>
+    Bo Zhao and Hakan Bilen. <a href="https://arxiv.org/abs/2110.04181">"Dataset Condensation with Distribution Matching"</a>, in arXiv preprint 2021
+</li>
+<li>
+    Kai Wang et al. <a href="https://arxiv.org/abs/2203.01531">"CAFE: Learning to Condense Dataset by Aligning Features"</a>, in CVPR 2022
+</li>
+</ol>
+
+# Reference
+Related papers:
+```
+@inproceedings{
+cazenavette2022distillation,
+title={Dataset Distillation by Matching Training Trajectories},
+author={George Cazenavette and Tongzhou Wang and Antonio Torralba and Alexei A. Efros and Jun-Yan Zhu},
+booktitle={Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition},
+year={2022}
+}
+```
+
+```
+@iniroceedings{
+cazenavette2022textures,
+title={Wearable ImageNet: Synthesizing Tileable Textures via Dataset Distillation},
+author= {George Cazenavette and Tongzhou Wang and Antonio Torralba and Alexei A. Efros and Jun-Yan Zhu},
+booktitle={Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) Workshops},
+year={2022},
+}
+```
